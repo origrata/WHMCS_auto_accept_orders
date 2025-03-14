@@ -15,7 +15,7 @@ use WHMCS\Database\Capsule;
 add_hook('AfterShoppingCartCheckout', 1, function ($vars) {
     $ServiceIDs = $vars['ServiceIDs'];
 
-    // Optimasi: Ambil semua data dalam satu query
+    // Ambil semua data dalam satu query
     $GData = Capsule::table('tblhosting')
         ->join('tblproducts', 'tblhosting.packageid', '=', 'tblproducts.id')
         ->join('tblorders', 'tblhosting.orderid', '=', 'tblorders.id')
@@ -24,6 +24,12 @@ add_hook('AfterShoppingCartCheckout', 1, function ($vars) {
         ->get();
 
     foreach ($GData as $data) {
+        // Jika harga produk = 0, langsung accept order
+        if ($data->productAmount == "0.00") {
+            MakeAcceptOrder($data->orderid, $data->serviceId);
+            continue;
+        }
+
         if ($data->productAutosetup === "order") {
             MakeAcceptOrder($data->orderid, $data->serviceId);
         } elseif ($data->productAutosetup === "payment") {
@@ -32,7 +38,7 @@ add_hook('AfterShoppingCartCheckout', 1, function ($vars) {
                     ->where('id', $data->invoiceid)
                     ->value('status');
 
-                if ($data->productAmount != "0.00" && $InvoiceStatus === 'Paid') {
+                if ($InvoiceStatus === 'Paid') {
                     MakeAcceptOrder($data->orderid, $data->serviceId);
                 }
             }
@@ -51,10 +57,16 @@ add_hook('InvoicePaid', 1, function ($vars) {
         ->join('tblhosting', 'tblorders.id', '=', 'tblhosting.orderid')
         ->join('tblproducts', 'tblhosting.packageid', '=', 'tblproducts.id')
         ->where('tblorders.invoiceid', $InvoiceID)
-        ->select('tblproducts.autosetup as productAutosetup', 'tblorders.id as orderid', 'tblhosting.id as serviceId')
+        ->select('tblproducts.autosetup as productAutosetup', 'tblorders.id as orderid', 'tblhosting.id as serviceId', 'tblhosting.firstpaymentamount as productAmount')
         ->get();
 
     foreach ($GData as $data) {
+        // Jika harga produk = 0, langsung accept order
+        if ($data->productAmount == "0.00") {
+            MakeAcceptOrder($data->orderid, $data->serviceId);
+            continue;
+        }
+
         if (in_array($data->productAutosetup, ["order", "payment"])) {
             MakeAcceptOrder($data->orderid, $data->serviceId);
         }
@@ -81,7 +93,6 @@ function MakeAcceptOrder($OrderID = "", $ServiceID = "")
     $admin = Capsule::table('tbladmins')->where('roleid', 1)->first();
 
     // **Cara 2:** (Opsional) Gunakan admin tertentu jika diketahui
-    // Gantilah 'GadangBana' dengan username admin Anda jika ingin spesifik
     // $admin = (object) ['username' => 'GadangBana'];
 
     if (!$admin) {
